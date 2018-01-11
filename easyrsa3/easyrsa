@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Easy-RSA 3 -- A Shell-based CA Utility
 #
@@ -59,7 +59,7 @@ DIRECTORY STATUS (commands would take effect on these locations)
 # Detailed command help
 # When called with no args, calls usage(), otherwise shows help for a command
 cmd_help() {
-	text="" 
+	text=""
 	opts=""
 	case "$1" in
 		init-pki|clean-all) text="
@@ -264,8 +264,8 @@ BEGIN {IGNORECASE=1; r=2}
 confirm() {
 	[ "$EASYRSA_BATCH" ] && return
 	prompt="$1"
-	value="$2" 
-	msg="$3" 
+	value="$2"
+	msg="$3"
 	input=""
 	print "
 $msg
@@ -414,7 +414,7 @@ Your newly created PKI dir is: $EASYRSA_PKI
 
 # build-ca backend:
 build_ca() {
-	opts="" 
+	opts=""
 	sub_ca=""
 	while [ -n "$1" ]; do
 		case "$1" in
@@ -577,14 +577,14 @@ key: $key_out
 
 # common signing backend
 sign_req() {
-	crt_type="$1" 
+	crt_type="$1"
 	opts=""
 	req_in="$EASYRSA_PKI/reqs/$2.req"
 	crt_out="$EASYRSA_PKI/issued/$2.crt"
 
 	# Randomize Serial number
-	i="" 
-	serial="" 
+	i=""
+	serial=""
 	check_serial=""
 	for i in 1 2 3 4 5; do
 		"$EASYRSA_OPENSSL" rand -hex -out "$EASYRSA_PKI/serial" 16
@@ -599,7 +599,7 @@ sign_req() {
 	# Support batch by internal caller:
 	[ "$3" = "batch" ] && EASYRSA_BATCH=1
 
-	verify_ca_init
+	# verify_ca_init
 
 	# Check argument sanity:
 	[ -n "$2" ] || die "\
@@ -636,37 +636,40 @@ $(display_dn req "$req_in")
 	# Generate the extensions file for this cert:
 	{
 		# Append first any COMMON file (if present) then the cert-type extensions
-		cat "$EASYRSA_EXT_DIR/COMMON"
-		cat "$EASYRSA_EXT_DIR/$crt_type"
+		cat "$EASYRSA_EXT_DIR/gnutls-COMMON"
+		cat "$EASYRSA_EXT_DIR/gnutls-$crt_type"
 		# copy req extensions
 		[ "$EASYRSA_CP_EXT" ] && print "copy_extensions = copy"
 
+		# Add expiration date to gnutls configuration
+		echo -e "expiration_days $EASYRSA_CERT_EXPIRE\n"
+
 		# Support a dynamic CA path length when present:
-		[ "$crt_type" = "ca" ] && [ -n "$EASYRSA_SUBCA_LEN" ] && \
-			print "basicConstraints = CA:TRUE, pathlen:$EASYRSA_SUBCA_LEN"
+#		[ "$crt_type" = "ca" ] && [ -n "$EASYRSA_SUBCA_LEN" ] && \
+#			print "basicConstraints = CA:TRUE, pathlen:$EASYRSA_SUBCA_LEN"
 
 		# Deprecated Netscape extension support, if enabled
-		if print "$EASYRSA_NS_SUPPORT" | awk_yesno; then
-			[ -n "$EASYRSA_NS_COMMENT" ] && \
-				print "nsComment = \"$EASYRSA_NS_COMMENT\""
-			case "$crt_type" in
-				server)	print "nsCertType = server" ;;
-				client)	print "nsCertType = client" ;;
-				ca)	print "nsCertType = sslCA" ;;
-			esac
-		fi
+#		if print "$EASYRSA_NS_SUPPORT" | awk_yesno; then
+#			[ -n "$EASYRSA_NS_COMMENT" ] && \
+#				print "nsComment = \"$EASYRSA_NS_COMMENT\""
+#			case "$crt_type" in
+#				server)	print "nsCertType = server" ;;
+#				client)	print "nsCertType = client" ;;
+#				ca)	print "nsCertType = sslCA" ;;
+#			esac
+#		fi
 
 		# If type is server and no subjectAltName was requested,
 		# add one to the extensions file
-		if [ "$crt_type" = 'server' ]; then
-			echo "$EASYRSA_EXTRA_EXTS" | 
-				grep -q subjectAltName || 
-				default_server_san "$req_in"
-		fi
+#		if [ "$crt_type" = 'server' ]; then
+#			echo "$EASYRSA_EXTRA_EXTS" |
+#				grep -q subjectAltName ||
+#				default_server_san "$req_in"
+#		fi
 
 		# Add any advanced extensions supplied by env-var:
 		[ -n "$EASYRSA_EXTRA_EXTS" ] && print "$EASYRSA_EXTRA_EXTS"
-		
+
 		: # needed to keep die from inherting the above test
 	} > "$EASYRSA_TEMP_EXT" || die "\
 Failed to create temp extension file (bad permissions?) at:
@@ -674,14 +677,24 @@ $EASYRSA_TEMP_EXT"
 
 	# sign request
 	# shellcheck disable=SC2086
+
+	# Do smart card stuff, eventually finding the private key token.
+	read -s -p "Enter card PIN: " pin
+	export GNUTLS_PIN=$pin
+	token_url="$(p11tool --list-tokens | grep 'serial=$EASYRSA_PKCS11_TOKEN_SERIAL' | awk '{print $2}')"
+	pkey_url="$(p11tool --list-privkeys \
+	    --login "$token_url" | grep "$EASYRSA_PKCS11_PKEY_SERIAL" | awk '{print $2}')"
+
+	# Now actually sign the request.
 	crt_out_tmp="$(mktemp "$crt_out.XXXXXXXXXX")"; EASYRSA_TEMP_FILE_2="$crt_out_tmp"
-	"$EASYRSA_OPENSSL" ca -utf8 -in "$req_in" -out "$crt_out_tmp" -config "$EASYRSA_SSL_CONF" \
-		-extfile "$EASYRSA_TEMP_EXT" -days "$EASYRSA_CERT_EXPIRE" -batch $opts \
-		|| die "signing failed (openssl output above may have more detail)"
+    "$EASYRSA_CERTTOOL" -c --load-ca-privkey="$pkey_url" --load-request "$req_in" --outfile "$crt_out_tmp" \
+	    --load-ca-certificate "$EASYRSA_PKI/ca.crt" --provider "$EASYRSA_PKCS11_PROVIDER" \
+		--template "$EASYRSA_TEMP_EXT" || die "signing failed (certtool output above may have more detail)"
+
 	mv "$crt_out_tmp" "$crt_out"; EASYRSA_TEMP_FILE_2=
 	notice "\
 Certificate created at: $crt_out
-"
+"\
 	return 0
 } # => sign_req()
 
@@ -791,7 +804,7 @@ import_req() {
 
 	# pull passed paths
 	in_req="$1" short_name="$2"
-	out_req="$EASYRSA_PKI/reqs/$2.req" 
+	out_req="$EASYRSA_PKI/reqs/$2.req"
 
 	[ -n "$short_name" ] || die "\
 Unable to import: incorrect command syntax.
@@ -806,7 +819,7 @@ Offending file: $in_req"
 Unable to import the request as the destination file already exists.
 Please choose a different name for your imported request file.
 Existing file at: $out_req"
-	
+
 	# now import it
 	cp "$in_req" "$out_req"
 
@@ -933,7 +946,7 @@ Failed to change the private key passphrase. See above for possible openssl
 error messages."
 
 	notice "Key passphrase successfully changed"
-	
+
 } # => set_pass()
 
 # update-db backend
@@ -969,7 +982,7 @@ default_server_san() {
 
 # verify a file seems to be a valid req/X509
 verify_file() {
-	format="$1" 
+	format="$1"
 	path="$2"
 	"$EASYRSA_OPENSSL" "$format" -in "$path" -noout 2>/dev/null || return 1
 	return 0
@@ -978,8 +991,8 @@ verify_file() {
 # show-* command backend
 # Prints req/cert details in a readable format
 show() {
-	type="$1" 
-	name="$2" 
+	type="$1"
+	name="$2"
 	in_file=""
 	format=""
 	[ -n "$name" ] || die "\
@@ -991,11 +1004,11 @@ Run easyrsa without commands for usage help."
 	opts="-${type}opt no_pubkey,no_sigdump"
 	while [ -n "$1" ]; do
 		case "$1" in
-			full) 
+			full)
 				opts=""
 				;;
-			*) 
-				warn "Ignoring unknown command option: '$1'" 
+			*)
+				warn "Ignoring unknown command option: '$1'"
 				;;
 		esac
 		shift
@@ -1057,18 +1070,18 @@ vars_setup() {
 	elif [ -f "$prog_vars" ]; then
 		vars="$prog_vars"
 	fi
-	
+
 	# If a vars file was located, source it
 	# If $EASYRSA_NO_VARS is defined (not blank) this is skipped
 	if [ -z "$EASYRSA_NO_VARS" ] && [ -n "$vars" ]; then
 		#shellcheck disable=SC2034
-		EASYRSA_CALLER=1 
+		EASYRSA_CALLER=1
 		# shellcheck disable=SC1090
 		. "$vars"
 		notice "\
 Note: using Easy-RSA configuration from: $vars"
 	fi
-	
+
 	# Set defaults, preferring existing env-vars if present
 	set_var EASYRSA		"${0%/*}"
 	set_var EASYRSA_OPENSSL	openssl

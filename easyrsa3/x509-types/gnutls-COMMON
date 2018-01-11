@@ -1,0 +1,5 @@
+# X509 extensions added to every signed cert (for use by gnutls)
+
+# This file is included for every cert signed, and by default does nothing.
+# It could be used to add values every cert should have, such as a CDP as
+# demonstrated in the following example:

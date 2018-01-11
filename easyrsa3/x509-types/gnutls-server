@@ -1,0 +1,4 @@
+# X509 extensions for a client (for use by gnutls)
+
+signing_key
+tls_www_server
