@@ -360,7 +360,7 @@ verify_ca_init() {
 	verify_pki_init
 
 	# verify expected files present:
-	for i in serial index.txt ca.crt private/ca.key; do
+	for i in serial index.txt ca.crt; do
 		if [ ! -f "$EASYRSA_PKI/$i" ]; then
 			[ "$1" = "test" ] && return 1
 			die "\
@@ -368,6 +368,14 @@ Missing expected CA file: $i (perhaps you need to run build-ca?)
 $help_note"
 		fi
 	done
+
+	# TODO: Verify that the inserted smart card has the CA key
+	# Do smart card stuff, eventually finding the private key token.
+	read -s -p "Enter card PIN: " pin
+	export GNUTLS_PIN=$pin
+	export token_url="$(p11tool --list-tokens | grep 'serial=$EASYRSA_PKCS11_TOKEN_SERIAL' | awk '{print $2}')"
+	export pkey_url="$(p11tool --list-privkeys \
+	    --login "$token_url" | grep "$EASYRSA_PKCS11_PKEY_SERIAL" | awk '{print $2}')"
 
 	# When operating in 'test' mode, return success.
 	# test callers don't care about CA-specific dir structure
@@ -599,7 +607,7 @@ sign_req() {
 	# Support batch by internal caller:
 	[ "$3" = "batch" ] && EASYRSA_BATCH=1
 
-	# verify_ca_init
+    verify_ca_init
 
 	# Check argument sanity:
 	[ -n "$2" ] || die "\
@@ -677,13 +685,6 @@ $EASYRSA_TEMP_EXT"
 
 	# sign request
 	# shellcheck disable=SC2086
-
-	# Do smart card stuff, eventually finding the private key token.
-	read -s -p "Enter card PIN: " pin
-	export GNUTLS_PIN=$pin
-	token_url="$(p11tool --list-tokens | grep 'serial=$EASYRSA_PKCS11_TOKEN_SERIAL' | awk '{print $2}')"
-	pkey_url="$(p11tool --list-privkeys \
-	    --login "$token_url" | grep "$EASYRSA_PKCS11_PKEY_SERIAL" | awk '{print $2}')"
 
 	# Now actually sign the request.
 	crt_out_tmp="$(mktemp "$crt_out.XXXXXXXXXX")"; EASYRSA_TEMP_FILE_2="$crt_out_tmp"
