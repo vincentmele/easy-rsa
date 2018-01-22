@@ -787,9 +787,11 @@ gen_crl() {
 
 	out_file="$EASYRSA_PKI/crl.pem"
 	out_file_tmp="$(mktemp "$out_file.XXXXXXXXXX")"; EASYRSA_TEMP_FILE_2="$out_file_tmp"
-	"$EASYRSA_OPENSSL" ca -utf8 -gencrl -out "$out_file_tmp" -config "$EASYRSA_SSL_CONF" || die "\
-CRL Generation failed.
-"
+
+    "$EASYRSA_CERTTOOL" --generate-crl --load-ca-privkey="$pkey_url" --outfile "$out_file_tmp" \
+	    --load-ca-certificate "$EASYRSA_PKI/ca.crt" --provider "$EASYRSA_PKCS11_PROVIDER" \
+		|| die "CRL Generation failed. (certtool output above may have more detail)"
+
 	mv "$out_file_tmp" "$out_file"; EASYRSA_TEMP_FILE_2=
 
 	notice "\
